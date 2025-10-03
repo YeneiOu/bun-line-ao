@@ -7,7 +7,7 @@ export const authRoute = (app: Elysia) =>
   app
     .use(cookie()) // Use the cookie plugin
     .get(
-      "/callback",
+      "/api/callback",
       async ({ query, cookie, set }) => {
         const { code, state } = query;
         const savedState = cookie.lineLoginState; // นี่คือ Cookie Object
