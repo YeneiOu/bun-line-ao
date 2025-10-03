@@ -39,6 +39,9 @@ export const authRoute = (app: Elysia) =>
               value: "",
               maxAge: -1,
               path: "/",
+              secure: process.env.NODE_ENV === "production",
+              httpOnly: true,
+              sameSite: "lax",
             },
           };
 
