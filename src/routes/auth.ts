@@ -1,31 +1,45 @@
 import { Elysia, t } from "elysia";
-import { cookie } from "@elysiajs/cookie";
-import { exchangeToken, verifyIdToken, getLineProfile } from "../services/line";
+import { exchangeToken, getLineProfile } from "../services/line";
 import { ResponseError, ResponseSuccess } from "../utils/response";
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT, jwtVerify, importPKCS8, importSPKI } from "jose";
 
-const privateKey = await crypto.subtle.importKey(
-  "pkcs8",
-  Buffer.from(process.env.JWT_PRIVATE_KEY!, "base64"), // Railway env should be base64
-  { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-  true,
-  ["sign"],
-);
+if (!process.env.JWT_PRIVATE_KEY) {
+  throw new Error("JWT_PRIVATE_KEY is not defined!");
+}
+if (!process.env.JWT_PUBLIC_KEY) {
+  throw new Error("JWT_PUBLIC_KEY is not defined!");
+}
 
-const publicKey = await crypto.subtle.importKey(
-  "spki",
-  Buffer.from(process.env.JWT_PUBLIC_KEY!, "base64"),
-  { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-  true,
-  ["verify"],
-);
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "super-secret-key",
-);
+/**
+ * Helper to decode base64 PEM keys and wrap them correctly
+ */
+function decodeBase64Pem(base64: string, type: "private" | "public") {
+  const header =
+    type === "private"
+      ? "-----BEGIN PRIVATE KEY-----"
+      : "-----BEGIN PUBLIC KEY-----";
+  const footer =
+    type === "private"
+      ? "-----END PRIVATE KEY-----"
+      : "-----END PUBLIC KEY-----";
+  const keyData = Buffer.from(base64, "base64").toString("utf-8");
+
+  return `${header}\n${keyData}\n${footer}`;
+}
+
+let privateKey: CryptoKey;
+let publicKey: CryptoKey;
+
+(async () => {
+  const privatePem = decodeBase64Pem(process.env.JWT_PRIVATE_KEY!, "private");
+  const publicPem = decodeBase64Pem(process.env.JWT_PUBLIC_KEY!, "public");
+
+  privateKey = await importPKCS8(privatePem, "RS256");
+  publicKey = await importSPKI(publicPem, "RS256");
+})();
 
 export const authRoute = (app: Elysia) =>
   app
-    .use(cookie()) // Use the cookie plugin
     .get(
       "/api/callback",
       async ({ query, set }) => {
@@ -35,20 +49,21 @@ export const authRoute = (app: Elysia) =>
           set.status = 400;
           return ResponseError(400, "Missing authorization code or state");
         }
+
         try {
           // 1. Exchange code for access token
           const tokenData = await exchangeToken(code);
 
-          // 2. Get user profile with LINE access token
+          // 2. Get LINE profile
           const profile = await getLineProfile(tokenData.access_token);
 
-          // 3. Issue our own JWT
+          // 3. Sign JWT with RS256
           const jwt = await new SignJWT({
             sub: profile.userId,
             name: profile.displayName,
             picture: profile.pictureUrl,
           })
-            .setProtectedHeader({ alg: "HS256" })
+            .setProtectedHeader({ alg: "RS256" })
             .setIssuedAt()
             .setExpirationTime("1h")
             .sign(privateKey);
@@ -58,11 +73,7 @@ export const authRoute = (app: Elysia) =>
             token: jwt,
             profile,
           });
-          // const frontendUrl = process.env.FRONTEND_URL;
-          // set.status = 302;
-          // set.headers["Location"] = `${frontendUrl}/callback`;
-          // return;
-        } catch (err: unknown) {
+        } catch (err) {
           console.error("LINE Login Failed:", err);
           set.status = 500;
           return ResponseError(500, "Login failed due to an internal error.");
@@ -75,6 +86,7 @@ export const authRoute = (app: Elysia) =>
         }),
       },
     )
+
     .get("/api/member", async ({ request, set }) => {
       const authHeader = request.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) {
@@ -92,33 +104,3 @@ export const authRoute = (app: Elysia) =>
         return ResponseError(401, "Invalid or expired token");
       }
     });
-
-// export const authRoute = (app: Elysia) =>
-//   app.get(
-//     "/callback",
-//     async ({ query }) => {
-//       const { code } = query;
-//       if (!code) {
-//         return error(400, "Missing code");
-//       }
-//       try {
-//         const tokenData = await exchangeToken(code as string);
-//         const profile = await verifyIdToken(tokenData.id_token);
-
-//         const responseData = success(200, "Login success", {
-//           token: tokenData,
-//           profile,
-//         });
-
-//         return responseData;
-//       } catch (err: unknown) {
-//         return error(500, err instanceof Error ? err.message : "Unknown error");
-//       }
-//     },
-//     {
-//       query: t.Object({
-//         code: t.String(),
-//         state: t.Optional(t.String()),
-//       }),
-//     },
-//   );
