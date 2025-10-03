@@ -75,7 +75,7 @@ export const authRoute = (app: Elysia) =>
           // });
           const frontendUrl = process.env.FRONTEND_URL;
           const redirectUrl =
-            `${frontendUrl}/callback` +
+            `${frontendUrl}/` +
             `?token=${encodeURIComponent(JSON.stringify(jwt))}` +
             `&profile=${encodeURIComponent(JSON.stringify(profile))}`;
 
