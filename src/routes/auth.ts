@@ -2,57 +2,70 @@ import { Elysia, t } from "elysia";
 import { cookie } from "@elysiajs/cookie";
 import { exchangeToken, verifyIdToken, getLineProfile } from "../services/line";
 import { ResponseError, ResponseSuccess } from "../utils/response";
+import { SignJWT, jwtVerify } from "jose";
+
+const privateKey = await crypto.subtle.importKey(
+  "pkcs8",
+  Buffer.from(process.env.JWT_PRIVATE_KEY!, "base64"), // Railway env should be base64
+  { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+  true,
+  ["sign"],
+);
+
+const publicKey = await crypto.subtle.importKey(
+  "spki",
+  Buffer.from(process.env.JWT_PUBLIC_KEY!, "base64"),
+  { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+  true,
+  ["verify"],
+);
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || "super-secret-key",
+);
 
 export const authRoute = (app: Elysia) =>
   app
     .use(cookie()) // Use the cookie plugin
     .get(
       "/api/callback",
-      async ({ query, cookie, set }) => {
+      async ({ query, set }) => {
         const { code, state } = query;
-        const savedState = cookie.lineLoginState; // นี่คือ Cookie Object
 
-        // 1. CRITICAL: Validate the state parameter
-        // 🔽 FIX: เทียบกับ .value ที่อยู่ข้างใน cookie
-        if (!state || !savedState || state !== savedState.value) {
-          set.status = 403; // Forbidden
-          return { message: "Invalid state. CSRF attack detected." };
-        }
-
-        if (!code) {
+        if (!code || !state) {
           set.status = 400;
-          return { message: "Missing authorization code" };
+          return ResponseError(400, "Missing authorization code or state");
         }
-
         try {
+          // 1. Exchange code for access token
           const tokenData = await exchangeToken(code);
 
-          set.cookie = {
-            accessToken: {
-              value: tokenData.access_token,
-              httpOnly: true,
-              secure: process.env.NODE_ENV === "production",
-              path: "/",
-              maxAge: tokenData.expires_in,
-            },
-            lineLoginState: {
-              value: "",
-              maxAge: -1,
-              path: "/",
-              secure: process.env.NODE_ENV === "production",
-              httpOnly: true,
-              sameSite: "lax",
-            },
-          };
+          // 2. Get user profile with LINE access token
+          const profile = await getLineProfile(tokenData.access_token);
 
-          const frontendUrl = process.env.FRONTEND_URL;
-          set.status = 302;
-          set.headers["Location"] = `${frontendUrl}/callback`;
-          return;
+          // 3. Issue our own JWT
+          const jwt = await new SignJWT({
+            sub: profile.userId,
+            name: profile.displayName,
+            picture: profile.pictureUrl,
+          })
+            .setProtectedHeader({ alg: "HS256" })
+            .setIssuedAt()
+            .setExpirationTime("1h")
+            .sign(privateKey);
+
+          // 4. Return JWT + profile to frontend
+          return ResponseSuccess(200, "Login success", {
+            token: jwt,
+            profile,
+          });
+          // const frontendUrl = process.env.FRONTEND_URL;
+          // set.status = 302;
+          // set.headers["Location"] = `${frontendUrl}/callback`;
+          // return;
         } catch (err: unknown) {
           console.error("LINE Login Failed:", err);
           set.status = 500;
-          return { message: "Login failed due to an internal error." };
+          return ResponseError(500, "Login failed due to an internal error.");
         }
       },
       {
@@ -62,25 +75,21 @@ export const authRoute = (app: Elysia) =>
         }),
       },
     )
-    .get("/api/member", async ({ cookie, set }) => {
-      const accessTokenCookie = cookie.accessToken; // นี่คือ Cookie Object
-
-      if (!accessTokenCookie || typeof accessTokenCookie.value !== "string") {
-        set.status = 401; // Unauthorized
-        return ResponseError(401, "Not authenticated or token is invalid");
+    .get("/api/member", async ({ request, set }) => {
+      const authHeader = request.headers.get("authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        set.status = 401;
+        return ResponseError(401, "Unauthorized");
       }
-      try {
-        // 🔽 FIX: ใช้ accessTokenCookie.value เพื่อส่งค่า string เข้าไปในฟังก์ชัน
-        // และเปลี่ยนไปใช้ getLineProfile เพราะ verifyIdToken ใช้กับ id_token
-        // ไม่ใช่ access_token
-        const profile = await getLineProfile(accessTokenCookie.value);
 
-        const responseData = ResponseSuccess(200, "Login success", profile);
-        return responseData;
-      } catch (error) {
-        console.error("Failed to fetch user profile:", error);
-        set.status = 500;
-        return ResponseError(500, "Failed to fetch user profile");
+      const token = authHeader.split(" ")[1];
+
+      try {
+        const { payload } = await jwtVerify(token, publicKey);
+        return ResponseSuccess(200, "User profile", payload);
+      } catch (e) {
+        set.status = 401;
+        return ResponseError(401, "Invalid or expired token");
       }
     });
 

@@ -30,6 +30,10 @@ yarn-error.log*
 .env.test.local
 .env.production.local
 
+private.pem
+public.pem
+generate-rsa-keys.ts
+
 # vercel
 .vercel
 
