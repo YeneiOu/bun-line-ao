@@ -41,7 +41,7 @@ let publicKey: CryptoKey;
 export const authRoute = (app: Elysia) =>
   app
     .get(
-      "/api/callback",
+      "/callback",
       async ({ query, set }) => {
         const { code, state } = query;
 
@@ -69,10 +69,18 @@ export const authRoute = (app: Elysia) =>
             .sign(privateKey);
 
           // 4. Return JWT + profile to frontend
-          return ResponseSuccess(200, "Login success", {
-            token: jwt,
-            profile,
-          });
+          // return ResponseSuccess(200, "Login success", {
+          //   token: jwt,
+          //   profile,
+          // });
+          const frontendUrl = process.env.FRONTEND_URL;
+          const redirectUrl =
+            `${frontendUrl}/callback` +
+            `?token=${encodeURIComponent(JSON.stringify(jwt))}` +
+            `&profile=${encodeURIComponent(JSON.stringify(profile))}`;
+
+          set.status = 302;
+          set.headers["Location"] = redirectUrl;
         } catch (err) {
           console.error("LINE Login Failed:", err);
           set.status = 500;
