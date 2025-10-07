@@ -1,8 +1,18 @@
-export function ResponseSuccess(
-  code: number = 0,
-  message: string = "success",
-  data: any,
-) {
+type ApiResponse<T = any> = {
+  code: number;
+  message: MessageResponse;
+  data: T;
+};
+type MessageResponse = {
+  code: number;
+  message: string;
+};
+
+export function ResponseSuccess<T>(
+  code = 0,
+  message: MessageResponse,
+  data: T
+): ApiResponse<T> {
   return {
     code,
     message,
@@ -10,11 +20,11 @@ export function ResponseSuccess(
   };
 }
 
-export function ResponseError(
+export function ResponseError<T = null>(
   code = 1,
-  message: string = "error",
-  data: any = null,
-) {
+  message: MessageResponse,
+  data: T
+): ApiResponse<T> {
   return {
     code,
     message,
