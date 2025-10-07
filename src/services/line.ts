@@ -23,13 +23,14 @@ export async function exchangeToken(code: string) {
     body: params,
   });
 
-  console.log("exchangeToken res", res);
+  const json = await res.json();
+  console.log("exchangeToken res", json);
 
   if (!res.ok) {
-    throw new Error(`LINE token request failed: ${res.statusText}`);
+    throw new Error(`LINE token request failed: ${json.error}`);
   }
 
-  return res.json(); // { access_token, id_token, ... }
+  return json; // { access_token, id_token, ... }
 }
 
 export async function verifyIdToken(idToken: string) {
@@ -51,7 +52,7 @@ export async function verifyIdToken(idToken: string) {
 }
 
 export const getLineProfile = async (
-  accessToken: string,
+  accessToken: string
 ): Promise<LineProfile> => {
   // Endpoint ของ LINE สำหรับดึงข้อมูลโปรไฟล์
   const profileUrl = "https://api.line.me/v2/profile";
