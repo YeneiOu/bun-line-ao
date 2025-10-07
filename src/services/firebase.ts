@@ -80,11 +80,11 @@ export class FirebaseService {
     }
   }
 
-  async getUserReservations(userId: string): Promise<Reservation[]> {
+  async getUserReservations(userLineId: string): Promise<Reservation[]> {
     try {
       const q = query(
         collection(db, this.getCollectionPath("reservations")),
-        where("userId", "==", userId),
+        where("userLineId", "==", userLineId),
         orderBy("createdAt", "desc"),
       );
 
